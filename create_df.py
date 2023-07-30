@@ -27,7 +27,9 @@ def create_dataframe(data_dir):
                 patient_ids.append(patient)
                 images_list.append(img[:, :, j])
                 masks_list.append(gt[:, :, j])
-
+    
+    expand_dimentions(images_list)
+    expand_dimentions(masks_list)
     data = {
         'patient_id': patient_ids,
         'image': images_list,
@@ -37,6 +39,11 @@ def create_dataframe(data_dir):
     
     return df
 
+def expand_dimentions(img_list):
+    for i, img in enumerate(img_list):
+        img_list[i] = np.expand_dims(img, axis=-1)
+    
+
 def crop_center_image(image, crop_size):
     height, width = image.shape[:2]
     start_y = max(0, height // 2 - crop_size // 2)
@@ -44,7 +51,7 @@ def crop_center_image(image, crop_size):
     start_x = max(0, width // 2 - crop_size // 2)
     end_x = min(width, width // 2 + crop_size // 2)
     
-    cropped_image = image[start_y:end_y, start_x:end_x]
+    cropped_image = image[start_y:end_y, start_x:end_x, :]
     return cropped_image
 
 def crop_center_images_in_dataframe(df, crop_size=168):
@@ -79,7 +86,7 @@ if not crop:
 else:
     with open('imgs.pkl', 'rb') as f:
         df = pickle.load(f)
-    crop_center_images_in_dataframe(df, crop_size=168)
+    crop_center_images_in_dataframe(df, crop_size=128)
     with open('imgs_cropped.pkl', 'wb') as fw:
         pickle.dump(df, fw)
     

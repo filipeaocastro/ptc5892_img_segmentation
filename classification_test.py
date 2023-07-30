@@ -5,33 +5,87 @@ import matplotlib.pyplot as plt
 import pickle
 from tensorflow import keras
 from tensorflow.keras.utils import load_img
+from tensorflow.keras import layers
 
-with open('imgs_cropped.pkl', 'rb') as f:
-    df = pickle.load(f)
+def get_model(img_size, num_classes):
+    inputs = keras.Input(shape=img_size)
 
-class imgRetriever(keras.utils.Sequence):
-    """Helper to iterate over the data"""
+    ### [First half of the network: downsampling inputs] ###
 
-    def __init__(self, batch_size, img_size, imgs_df):
-        self.batch_size = batch_size
-        self.img_size = img_size
-        self.imgs_df = imgs_df
+    # Entry block
+    x = layers.Conv2D(64, 3, strides=1, padding="same")(inputs)
+    x = layers.BatchNormalization()(x)
+    x = layers.Activation("relu")(x)
 
-    def __len__(self):
-        return len(self.imgs_df['image']) // self.batch_size
+    x = layers.SeparableConv2D(64, 3, padding="same")(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Activation("relu")(x)
 
-    def __getitem__(self, idx):
-        """Returns tuple (input, target) correspond to batch #idx."""
-        i = idx * self.batch_size
-        # batch_input_img_paths = self.input_img_paths[i : i + self.batch_size]
-        # batch_target_img_paths = self.target_img_paths[i : i + self.batch_size]
-        x = np.zeros((self.batch_size,) + self.img_size, dtype="float32")
-        for j, img in enumerate(self.imgs_df['image'][i : i + self.batch_size]):
-            x[j] = img
-        y = np.zeros((self.batch_size,) + self.img_size, dtype="float32")
-        for j, img in enumerate(self.imgs_df['mask'][i : i + self.batch_size]):
-            y[j] = img
+    previous_block_activation = x  # Set aside residual
 
-        return x, y
+    # Blocks 1, 2, 3 are identical apart from the feature depth.
+    for filters in [128, 256, 512]:
+        x = layers.MaxPooling2D(3, strides=2, padding="same")(x)
+        
+        x = layers.SeparableConv2D(filters, 3, padding="same")(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.Activation("relu")(x)
 
-pass
+        x = layers.SeparableConv2D(filters, 3, padding="same")(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.Activation("relu")(x)
+
+        # x = layers.MaxPooling2D(3, strides=2, padding="same")(x)
+
+        # Project residual
+        residual = layers.Conv2D(filters, 1, strides=2, padding="same")(
+            previous_block_activation
+        )
+        x = layers.add([x, residual])  # Add back residual
+        previous_block_activation = x  # Set aside next residual
+
+    ### [Second half of the network: upsampling inputs] ###
+
+    for filters in [512, 256, 128]:
+        x = layers.Activation("relu")(x)
+        x = layers.Conv2DTranspose(filters, 3, padding="same")(x)
+        x = layers.BatchNormalization()(x)
+
+        x = layers.Activation("relu")(x)
+        x = layers.Conv2DTranspose(filters, 3, padding="same")(x)
+        x = layers.BatchNormalization()(x)
+
+        x = layers.UpSampling2D(2)(x)
+
+        # Project residual
+        residual = layers.UpSampling2D(2)(previous_block_activation)
+        residual = layers.Conv2D(filters, 1, padding="same")(residual)
+        x = layers.add([x, residual])  # Add back residual
+        previous_block_activation = x  # Set aside next residual
+
+    # Add a per-pixel classification layer
+    outputs = layers.Conv2D(1, 1, activation="sigmoid", padding="same")(x)
+
+    # Define the model
+    model = keras.Model(inputs, outputs)
+    return model
+
+
+if __name__ == '__main__':
+    # with open('imgs_cropped.pkl', 'rb') as f:
+    #     df = pickle.load(f)
+
+    random_seed = 1
+    # df = df.sample(frac=1.0, random_state=random_seed).reset_index(drop=True)
+
+    # img_size = df['image'][0].shape
+    img_size = (128, 128, 1)
+    num_classes = 2
+    batch_size = 32
+
+    # Free up RAM in case the model definition cells were run multiple times
+    keras.backend.clear_session()
+
+    # Build model
+    model = get_model(img_size, num_classes)
+    model.summary()
