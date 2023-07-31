@@ -1,259 +1,77 @@
-"""
-author: Clément Zotti (clement.zotti@usherbrooke.ca)
-date: April 2017
-
-DESCRIPTION :
-The script provide helpers functions to handle nifti image format:
-    - load_nii()
-    - save_nii()
-
-to generate metrics for two images:
-    - metrics()
-
-And it is callable from the command line (see below).
-Each function provided in this script has comments to understand
-how they works.
-
-HOW-TO:
-
-This script was tested for python 3.4.
-
-First, you need to install the required packages with
-    pip install -r requirements.txt
-
-After the installation, you have two ways of running this script:
-    1) python metrics.py ground_truth/patient001_ED.nii.gz prediction/patient001_ED.nii.gz
-    2) python metrics.py ground_truth/ prediction/
-
-The first option will print in the console the dice and volume of each class for the given image.
-The second option wiil ouput a csv file where each images will have the dice and volume of each class.
-
-
-Link: http://acdc.creatis.insa-lyon.fr
-
-"""
-
-import os
-from glob import glob
-import time
-import re
-import argparse
-import nibabel as nib
-import pandas as pd
-from medpy.metric.binary import hd, dc
 import numpy as np
+import matplotlib.pyplot as plt
+from skimage.metrics import structural_similarity as sk_ssim
+from skimage.metrics import mean_squared_error
 
 
+def threshold_binary_images(pred_prob_maps, threshold=0.5):
+    # Apply threshold to the probability maps
+    binary_images = (pred_prob_maps > threshold).astype(np.uint8)
+    return binary_images
 
-HEADER = ["Name", "Dice LV", "Volume LV", "Err LV(ml)",
-          "Dice RV", "Volume RV", "Err RV(ml)",
-          "Dice MYO", "Volume MYO", "Err MYO(ml)"]
+def _mean(trues, preds, metric):
+    metrics = [metric(true, pred) for true, pred in zip(trues, preds)]
+    return np.mean(metrics), np.std(metrics)
 
-#
-# Utils functions used to sort strings into a natural order
-#
-def conv_int(i):
-    return int(i) if i.isdigit() else i
+def dice(true, pred, threshold=0.2):
+    pred = threshold_binary_images(pred, threshold)
+    return (2 * np.sum(true[pred == 1]) + 0.001) / (np.sum(true) + np.sum(pred) + 0.001)
 
+def dice_mean(trues, preds, threshold=0.2):
+    dices = [dice(true, pred, threshold) for true, pred in zip(trues, preds)]
+    return np.mean(dices), np.std(dices), threshold
 
-def natural_order(sord):
-    """
-    Sort a (list,tuple) of strings into natural order.
+def rmse(true, pred):
+    return np.sqrt(mean_squared_error(true, pred))
 
-    Ex:
+def ssim(true, pred):
+    return sk_ssim(true, pred, channel_axis=-1, data_range=1)
 
-    ['1','10','2'] -> ['1','2','10']
+def ssim_mean(trues, preds):
+    return _mean(trues, preds, ssim)
 
-    ['abc1def','ab10d','b2c','ab1d'] -> ['ab1d','ab10d', 'abc1def', 'b2c']
+def nrmse(true, pred, method='intensity'):
+    if method == 'range':
+        return rmse(true, pred) / (true.max() - true.min())
+    elif method == 'mean':
+        return rmse(true, pred) / np.mean(true)
+    elif method == 'intensity':
+        return np.sqrt(np.power(true - pred, 2) / (np.power(true, 2) + 0.001))
+    
+def nrmse_mean(trues, preds, method='intensity'):
+    nrmses = [nrmse(true, pred, method) for true, pred in zip(trues, preds)]
+    return np.mean(nrmses), np.std(nrmses)
 
-    """
-    if isinstance(sord, tuple):
-        sord = sord[0]
-    return [conv_int(c) for c in re.split(r'(\d+)', sord)]
+    
+def dice_threshold(trues, preds, plot=False):
 
+    thresholds = np.linspace(0.05, 0.95, 19)
+    dices = []
 
-#
-# Utils function to load and save nifti files with the nibabel package
-#
-def load_nii(img_path):
-    """
-    Function to load a 'nii' or 'nii.gz' file, The function returns
-    everyting needed to save another 'nii' or 'nii.gz'
-    in the same dimensional space, i.e. the affine matrix and the header
+    for t in thresholds:
+        bin_preds = threshold_binary_images(preds, threshold=t)
+        mean_dice = [dice(true, pred) for true, pred in zip(trues, bin_preds)]
+        dices.append(np.mean(mean_dice))
+    
+    if plot:
+        plt.plot(thresholds, dices)
+        plt.xlabel('Threshold')
+        plt.ylabel("Dice")
+        plt.show()
 
-    Parameters
-    ----------
+    return max(dices), thresholds[np.argmax(dices)] 
 
-    img_path: string
-    String with the path of the 'nii' or 'nii.gz' image file name.
+def summary(trues, preds, cohort="val", threshold=0.2):
 
-    Returns
-    -------
-    Three element, the first is a numpy array of the image values,
-    the second is the affine transformation of the image, and the
-    last one is the header of the image.
-    """
-    nimg = nib.load(img_path)
-    return nimg.get_data(), nimg.affine, nimg.header
+    if cohort == 'val':
+        print(f"\n##### Metrics Summary for validation #####")
+        print("NRMSE: %.3f ± %.3f" % nrmse_mean(trues, preds))
+        print("SSIM: %.3f ± %.3f" % ssim_mean(trues, preds))
+        print("Best Dice: %.3f - for threshold %.3f" % dice_threshold(trues, preds))
 
-
-def save_nii(img_path, data, affine, header):
-    """
-    Function to save a 'nii' or 'nii.gz' file.
-
-    Parameters
-    ----------
-
-    img_path: string
-    Path to save the image should be ending with '.nii' or '.nii.gz'.
-
-    data: np.array
-    Numpy array of the image data.
-
-    affine: list of list or np.array
-    The affine transformation to save with the image.
-
-    header: nib.Nifti1Header
-    The header that define everything about the data
-    (pleasecheck nibabel documentation).
-    """
-    nimg = nib.Nifti1Image(data, affine=affine, header=header)
-    nimg.to_filename(img_path)
-
-
-#
-# Functions to process files, directories and metrics
-#
-def metrics(img_gt, img_pred, voxel_size):
-    """
-    Function to compute the metrics between two segmentation maps given as input.
-
-    Parameters
-    ----------
-    img_gt: np.array
-    Array of the ground truth segmentation map.
-
-    img_pred: np.array
-    Array of the predicted segmentation map.
-
-    voxel_size: list, tuple or np.array
-    The size of a voxel of the images used to compute the volumes.
-
-    Return
-    ------
-    A list of metrics in this order, [Dice LV, Volume LV, Err LV(ml),
-    Dice RV, Volume RV, Err RV(ml), Dice MYO, Volume MYO, Err MYO(ml)]
-    """
-
-    if img_gt.ndim != img_pred.ndim:
-        raise ValueError("The arrays 'img_gt' and 'img_pred' should have the "
-                         "same dimension, {} against {}".format(img_gt.ndim,
-                                                                img_pred.ndim))
-
-    res = []
-    # Loop on each classes of the input images
-    for c in [3, 1, 2]:
-        # Copy the gt image to not alterate the input
-        gt_c_i = np.copy(img_gt)
-        gt_c_i[gt_c_i != c] = 0
-
-        # Copy the pred image to not alterate the input
-        pred_c_i = np.copy(img_pred)
-        pred_c_i[pred_c_i != c] = 0
-
-        # Clip the value to compute the volumes
-        gt_c_i = np.clip(gt_c_i, 0, 1)
-        pred_c_i = np.clip(pred_c_i, 0, 1)
-
-        # Compute the Dice
-        dice = dc(gt_c_i, pred_c_i)
-
-        # Compute volume
-        volpred = pred_c_i.sum() * np.prod(voxel_size) / 1000.
-        volgt = gt_c_i.sum() * np.prod(voxel_size) / 1000.
-
-        res += [dice, volpred, volpred-volgt]
-
-    return res
-
-
-def compute_metrics_on_files(path_gt, path_pred):
-    """
-    Function to give the metrics for two files
-
-    Parameters
-    ----------
-
-    path_gt: string
-    Path of the ground truth image.
-
-    path_pred: string
-    Path of the predicted image.
-    """
-    gt, _, header = load_nii(path_gt)
-    pred, _, _ = load_nii(path_pred)
-    zooms = header.get_zooms()
-
-    name = os.path.basename(path_gt)
-    name = name.split('.')[0]
-    res = metrics(gt, pred, zooms)
-    res = ["{:.3f}".format(r) for r in res]
-
-    formatting = "{:>14}, {:>7}, {:>9}, {:>10}, {:>7}, {:>9}, {:>10}, {:>8}, {:>10}, {:>11}"
-    print(formatting.format(*HEADER))
-    print(formatting.format(name, *res))
-
-
-def compute_metrics_on_directories(dir_gt, dir_pred):
-    """
-    Function to generate a csv file for each images of two directories.
-
-    Parameters
-    ----------
-
-    path_gt: string
-    Directory of the ground truth segmentation maps.
-
-    path_pred: string
-    Directory of the predicted segmentation maps.
-    """
-    lst_gt = sorted(glob(os.path.join(dir_gt, '*')), key=natural_order)
-    lst_pred = sorted(glob(os.path.join(dir_pred, '*')), key=natural_order)
-
-    res = []
-    for p_gt, p_pred in zip(lst_gt, lst_pred):
-        if os.path.basename(p_gt) != os.path.basename(p_pred):
-            raise ValueError("The two files don't have the same name"
-                             " {}, {}.".format(os.path.basename(p_gt),
-                                               os.path.basename(p_pred)))
-
-        gt, _, header = load_nii(p_gt)
-        pred, _, _ = load_nii(p_pred)
-        zooms = header.get_zooms()
-        res.append(metrics(gt, pred, zooms))
-
-    lst_name_gt = [os.path.basename(gt).split(".")[0] for gt in lst_gt]
-    res = [[n,] + r for r, n in zip(res, lst_name_gt)]
-    df = pd.DataFrame(res, columns=HEADER)
-    df.to_csv("results_{}.csv".format(time.strftime("%Y%m%d_%H%M%S")), index=False)
-
-def main(path_gt, path_pred):
-    """
-    Main function to select which method to apply on the input parameters.
-    """
-    if os.path.isfile(path_gt) and os.path.isfile(path_pred):
-        compute_metrics_on_files(path_gt, path_pred)
-    elif os.path.isdir(path_gt) and os.path.isdir(path_pred):
-        compute_metrics_on_directories(path_gt, path_pred)
     else:
-        raise ValueError(
-            "The paths given needs to be two directories or two files.")
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Script to compute ACDC challenge metrics.")
-    parser.add_argument("GT_IMG", type=str, help="Ground Truth image")
-    parser.add_argument("PRED_IMG", type=str, help="Predicted image")
-    args = parser.parse_args()
-    main(args.GT_IMG, args.PRED_IMG)
+        print(f"\n##### Metrics Summary for testing #####")
+        print("NRMSE: %.3f ± %.3f" % nrmse_mean(trues, preds))
+        print("SSIM: %.3f ± %.3f" % ssim_mean(trues, preds))
+        print("Dice: %.3f ± %.3f (threshold = %.2f)" % dice_mean(trues, preds, threshold))
+        # print("Best Dice: %.3f - for threshold %.3f" % dice_threshold(trues, preds))

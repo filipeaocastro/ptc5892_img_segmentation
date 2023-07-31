@@ -3,7 +3,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import nibabel as nib
-from plot_img import create_binary_mask
+import pickle
+
+def create_binary_mask(ground_truth):
+    myo_val = 2
+    mask = np.zeros_like(ground_truth)
+    mask[ground_truth == myo_val] = 1
+
+    return mask
 
 def add_to_dict_info(all_patients_info : dict, patient, abspath, files):
     cfg = "Info.cfg"
@@ -35,23 +42,21 @@ def save_mask(patient, abspath, files):
         np.save(save_path, mask, allow_pickle=True)
 
 
-dirpath = "data\\NORpatients"
+# dirpath = "data\\NORpatients"
+dirpath = os.path.join('data', 'NORpatients')
 pat_infos = []
 all_pats = list(os.walk(dirpath))
+print(f'walk: {all_pats}')
 
 for patient, (abspath, folders, files) in zip(all_pats[0][1], all_pats[1:]):
 
     add_to_dict_info(pat_infos, patient, abspath, files)
-    save_mask(patient, abspath, files)
-
+    if pat_infos[-1]['Group'] == 'NOR':
+        save_mask(patient, abspath, files)
     pass
 
-
-
-
-
-
-
+with open(os.path.join(dirpath, 'pat_info.pkl'), 'wb') as f:
+    pickle.dump(pat_infos, f)
 
 
 

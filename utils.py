@@ -16,8 +16,6 @@ class imgRetriever(keras.utils.Sequence):
     def __getitem__(self, idx):
         """Returns tuple (input, target) correspond to batch #idx."""
         i = idx * self.batch_size
-        # batch_input_img_paths = self.input_img_paths[i : i + self.batch_size]
-        # batch_target_img_paths = self.target_img_paths[i : i + self.batch_size]
         x = np.zeros((self.batch_size,) + self.img_size, dtype="float32")
         for j, img in enumerate(self.imgs_df['image'][i : i + self.batch_size]):
             x[j] = img

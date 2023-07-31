@@ -4,16 +4,54 @@ import pandas as pd
 import nibabel as nib
 import pickle
 
-def create_dataframe(data_dir):
+def create_dataframe(dirpath):
     patient_ids = []
     images_list = []
     masks_list = []
 
-    dirpath = "data\\NORpatients"
+    all_pats = list(os.walk(dirpath))
+    print(f'walk: {all_pats}')
+
+    for patient, (abspath, folders, files) in zip(all_pats[0][1], all_pats[1:]):
+        for filename in files:
+            if "_gt.npy" not in filename: continue
+
+            path_gt = os.path.join(abspath, filename)
+            gt = np.load(path_gt)
+            split_f = filename.split('_gt.npy')
+            img_filename = split_f[0] + ".nii.gz"
+            path_img = os.path.join(abspath, img_filename)
+            img = nib.load(path_img).get_fdata()
+
+            for j in range(img.shape[2]):
+                patient_ids.append(patient)
+                images_list.append(img[:, :, j])
+                masks_list.append(gt[:, :, j])
+    
+    expand_dimentions(images_list)
+    expand_dimentions(masks_list)
+    data = {
+        'patient_id': patient_ids,
+        'image': images_list,
+        'mask': masks_list
+    }
+    df = pd.DataFrame(data)
+    
+    return df
+
+def create_dataframe_testing(dirpath):
+    patient_ids = []
+    images_list = []
+    masks_list = []
+
+    with open(os.path.join(dirpath, 'pat_info.pkl'), 'rb') as f:
+        pat_info = pickle.load(f)
+
     all_pats = list(os.walk(dirpath))
 
     for patient, (abspath, folders, files) in zip(all_pats[0][1], all_pats[1:]):
         for filename in files:
+
             if "_gt.npy" not in filename: continue
 
             path_gt = os.path.join(abspath, filename)
@@ -74,22 +112,39 @@ def crop_center_images_in_dataframe(df, crop_size=168):
 
     # return df
 
+if __name__ == "__main__":
 
-crop = True
+    test = False
+    crop = True
 
-if not crop:
-    data_dir = "data" 
-    df = create_dataframe(data_dir)
+    filename = 'imgs.pkl' if not test else 'imgs_test.pkl'
 
-    with open('imgs.pkl', 'wb') as f:
-        pickle.dump(df, f)
-else:
-    with open('imgs.pkl', 'rb') as f:
-        df = pickle.load(f)
-    crop_center_images_in_dataframe(df, crop_size=128)
-    with open('imgs_cropped.pkl', 'wb') as fw:
-        pickle.dump(df, fw)
+
+    if test:
+        dirpath = os.path.join('data', 'testing')
+        df = create_dataframe_testing(dirpath)
+
+    else:
+        data_dir = os.path.join('data', 'NORpatients')
+        df = create_dataframe(data_dir)
+
+    # with open(filename, 'wb') as f:
+    #     pickle.dump(df, f)
+
+
+    # with open(filename, 'rb') as f:
+    #     df = pickle.load(f)
+    if crop:
+        crop_center_images_in_dataframe(df, crop_size=128)
+        filename = filename.split('.pkl')[0]
+
+        with open(f'{filename}_cropped.pkl', 'wb') as fw:
+            pickle.dump(df, fw)
     
+    else:
+        with open(filename, 'wb') as f:
+            pickle.dump(df, f)
+        
 
 
     
