@@ -47,11 +47,14 @@ def dice_threshold(trues, preds, plot=False):
 
     thresholds = np.linspace(0.05, 0.95, 19)
     dices = []
+    dices_stds = []
 
     for t in thresholds:
         bin_preds = threshold_binary_images(preds, threshold=t)
-        mean_dice = [dice(true, pred) for true, pred in zip(trues, bin_preds)]
-        dices.append(np.mean(mean_dice))
+
+        d = [dice(true, pred) for true, pred in zip(trues, bin_preds)]
+        dices.append(np.mean(d))
+        dices_stds.append(np.std(d))
     
     if plot:
         plt.plot(thresholds, dices)
@@ -59,7 +62,9 @@ def dice_threshold(trues, preds, plot=False):
         plt.ylabel("Dice")
         plt.show()
 
-    return max(dices), thresholds[np.argmax(dices)] 
+    best_dice_idx = np.argmax(dices)
+
+    return dices[best_dice_idx], dices_stds[best_dice_idx], thresholds[best_dice_idx]
 
 def summary(trues, preds, cohort="val", threshold=0.2):
 
@@ -67,7 +72,7 @@ def summary(trues, preds, cohort="val", threshold=0.2):
         print(f"\n##### Metrics Summary for validation #####")
         print("NRMSE: %.3f ± %.3f" % nrmse_mean(trues, preds))
         print("SSIM: %.3f ± %.3f" % ssim_mean(trues, preds))
-        print("Best Dice: %.3f - for threshold %.3f" % dice_threshold(trues, preds))
+        print("Best Dice: %.3f ± %.3f - for threshold %.3f" % dice_threshold(trues, preds))
 
     else:
         print(f"\n##### Metrics Summary for testing #####")

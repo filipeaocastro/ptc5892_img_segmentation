@@ -86,7 +86,7 @@ if __name__ == '__main__':
     # img_size = df['image'][0].shape
     img_size = (128, 128, 1)
     num_classes = 2
-    batch_size = 32
+    batch_size = 16
 
     # Free up RAM in case the model definition cells were run multiple times
     keras.backend.clear_session()

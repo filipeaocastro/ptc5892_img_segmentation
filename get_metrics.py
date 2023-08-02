@@ -15,7 +15,7 @@ df = None
 
 gen_test = get_test_data('imgs_test_cropped.pkl')
 
-model = keras.models.load_model("model_epochs30_batchsz16_noPatMix.keras")
+model = keras.models.load_model("model_epochs25_batchsz16_noPatMix.keras")
 
 preds = {}
 trues = {}
@@ -27,7 +27,7 @@ trues['val'] = [gen_val[i][1][0] for i in range(len(gen_val))]
 trues['test'] = [gen_test[i][1][0] for i in range(len(gen_test))]
 
 metrics.summary(trues['val'], preds['val'], cohort="val")
-_, threshold = metrics.dice_threshold(trues['val'], preds['val'])
+_, threshold, _ = metrics.dice_threshold(trues['val'], preds['val'], plot=True)
 metrics.summary(trues['test'], preds['test'], cohort="test", threshold=threshold)
 
 pass
